@@ -13,12 +13,12 @@
 # │  VM:    Ubuntu 24.04, 4 vCPU, 4 GB RAM                             │
 # │                                                                     │
 # │  Usage:                                                             │
-# │    vagrant up                  # 전체 환경 구성 (~15분)             │
-# │    vagrant ssh                 # VM 접속                            │
-# │    vagrant destroy -f          # 환경 삭제                          │
+# │    vagrant up                  # Full environment setup (~15 min)   │
+# │    vagrant ssh                 # Connect to the VM                  │
+# │    vagrant destroy -f          # Destroy the environment            │
 # │                                                                     │
-# │  Provider: VirtualBox (기본) / libvirt                              │
-# │    libvirt 사용 시: vagrant up --provider=libvirt                   │
+# │  Provider: VirtualBox (default) / libvirt                           │
+# │    For libvirt: vagrant up --provider=libvirt                       │
 # └─────────────────────────────────────────────────────────────────────┘
 
 NODE_IP          = "192.168.56.10"
@@ -28,11 +28,11 @@ POD_CIDR         = "10.244.0.0/16"
 SVC_CIDR         = "10.96.0.0/12"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 1 — 시스템 기본 설정
+# STEP 1 — Base system setup
 # ══════════════════════════════════════════════════════════════════════════════
 $setup_system = <<~'SHELL'
   set -euo pipefail
-  echo "=== [1/6] 시스템 설정 ==="
+  echo "=== [1/6] System setup ==="
 
   cat > /etc/modules-load.d/k8s.conf <<EOF
 br_netfilter
@@ -61,9 +61,9 @@ EOF
     "linux-modules-extra-${KERN}" 2>/dev/null || true
   modprobe sctp 2>/dev/null || true
 
-  # ── 표준 CNI 플러그인 설치 (macvlan, bandwidth, portmap 등) ──────────────
-  # Multus가 /opt/cni/bin 에서 macvlan / bandwidth 바이너리를 찾으므로
-  # k3s / Calico 설치 전에 미리 배치해야 Pod 생성 시 CNI 오류가 발생하지 않음
+  # ── Install standard CNI plugins (macvlan, bandwidth, portmap, etc.) ───
+  # Multus looks up macvlan / bandwidth binaries under /opt/cni/bin,
+  # so they must be placed before installing k3s / Calico to avoid CNI errors during Pod creation.
   CNI_PLUGINS_VER="v1.4.1"
   CNI_TGZ="/opt/cni/cni-plugins-linux-amd64-${CNI_PLUGINS_VER}.tgz"
   mkdir -p /opt/cni/bin
@@ -72,18 +72,18 @@ EOF
     "https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VER}/cni-plugins-linux-amd64-${CNI_PLUGINS_VER}.tgz" \
     -o "${CNI_TGZ}"
   tar -xzf "${CNI_TGZ}" -C /opt/cni/bin
-  echo "CNI 플러그인 설치 완료: $(ls /opt/cni/bin | tr '\n' ' ')"
+  echo "CNI plugins installed: $(ls /opt/cni/bin | tr '\n' ' ')"
 
-  echo "=== [1/6] 완료 ==="
+  echo "=== [1/6] Done ==="
 SHELL
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 2 — k3s 설치
-# k3s 옵션을 config 파일로 전달 → heredoc 내 따옴표 충돌 없음
+# STEP 2 — Install k3s
+# Pass k3s options through a config file to avoid quote conflicts inside the heredoc.
 # ══════════════════════════════════════════════════════════════════════════════
 $install_k3s = <<~'SHELL'
   set -euo pipefail
-  echo "=== [2/6] k3s 설치 ==="
+  echo "=== [2/6] Installing k3s ==="
 
   NODE_IP="192.168.56.10"
   POD_CIDR="10.244.0.0/16"
@@ -114,18 +114,18 @@ EOF
   echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" > /etc/profile.d/k3s.sh
 
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-  echo -n "k3s API 대기 중"
+  echo -n "Waiting for k3s API"
   for i in $(seq 1 60); do
     kubectl get nodes > /dev/null 2>&1 && break
     printf "."
     sleep 3
   done
-  echo " 완료"
+  echo " done"
 
-  # master 노드 라벨 추가 (LoxiLB nodeSelector 호환)
+  # Add the master node label for LoxiLB nodeSelector compatibility.
   kubectl label node "$(hostname)" node-role.kubernetes.io/master='' --overwrite
 
-  echo "=== [2/6] 완료 ==="
+  echo "=== [2/6] Done ==="
 SHELL
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -134,7 +134,7 @@ SHELL
 $install_calico = <<~'SHELL'
   set -euo pipefail
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-  echo "=== [3/6] Calico CNI 설치 ==="
+  echo "=== [3/6] Installing Calico CNI ==="
 
   POD_CIDR="10.244.0.0/16"
   CALICO_VER="v3.27.3"
@@ -144,7 +144,7 @@ $install_calico = <<~'SHELL'
     | sed "s|192\.168\.0\.0/16|${POD_CIDR}|g" \
     | kubectl apply -f -
 
-  echo -n "Calico DaemonSet 대기 중"
+  echo -n "Waiting for Calico DaemonSet"
   for i in $(seq 1 30); do
     kubectl -n kube-system get ds calico-node > /dev/null 2>&1 && break
     printf "."
@@ -152,16 +152,16 @@ $install_calico = <<~'SHELL'
   done
   kubectl -n kube-system rollout status ds/calico-node --timeout=300s
 
-  echo -n "Node Ready 대기 중"
+  echo -n "Waiting for node readiness"
   for i in $(seq 1 40); do
     kubectl get nodes | grep -q " Ready" && break
     printf "."
     sleep 5
   done
-  echo " 완료"
+  echo " done"
 
-  # Multus 기본(delegate) CNI가 /opt/cni/bin/* 를 참조하므로,
-  # provision 재실행 중 덮어쓰기 레이스를 피하기 위해 누락 파일만 보강한다.
+  # The default delegate CNI used by Multus reads /opt/cni/bin/*,
+  # so only missing files are repaired to avoid overwrite races during reprovisioning.
   CNI_PLUGINS_VER="v1.4.1"
   CNI_TGZ="/opt/cni/cni-plugins-linux-amd64-${CNI_PLUGINS_VER}.tgz"
   if [ ! -f "${CNI_TGZ}" ]; then
@@ -180,9 +180,9 @@ $install_calico = <<~'SHELL'
   rm -rf "${TMP_CNI_DIR}"
 
   if [ ! -x /opt/cni/bin/calico ] || [ ! -x /opt/cni/bin/calico-ipam ]; then
-    echo "[INFO] Calico CNI 바이너리 보강 진행"
+    echo "[INFO] Repairing Calico CNI binaries"
 
-    # 1) k3s current bin 경로에서 우선 복구
+    # 1) First, restore from the k3s current bin path.
     if [ -x /var/lib/rancher/k3s/data/current/bin/calico ] && [ ! -x /opt/cni/bin/calico ]; then
       cp -f /var/lib/rancher/k3s/data/current/bin/calico /opt/cni/bin/calico
     fi
@@ -190,7 +190,7 @@ $install_calico = <<~'SHELL'
       cp -f /var/lib/rancher/k3s/data/current/bin/calico-ipam /opt/cni/bin/calico-ipam
     fi
 
-    # 2) 여전히 없으면 calico-node pod에서 가능한 경로(/host/opt/cni/bin 또는 /opt/cni/bin)로 시도
+    # 2) If still missing, try available paths in the calico-node Pod (/host/opt/cni/bin or /opt/cni/bin).
     if [ ! -x /opt/cni/bin/calico ] || [ ! -x /opt/cni/bin/calico-ipam ]; then
       CALICO_POD=""
       for i in $(seq 1 30); do
@@ -210,7 +210,7 @@ $install_calico = <<~'SHELL'
       fi
     fi
 
-    # 3) 그래도 없으면 calico-node를 재시작해 init-container가 다시 host CNI 경로를 채우게 한다.
+    # 3) If still missing, restart calico-node so the init container repopulates the host CNI path.
     if [ ! -x /opt/cni/bin/calico ] || [ ! -x /opt/cni/bin/calico-ipam ]; then
       kubectl -n kube-system rollout restart ds/calico-node || true
       kubectl -n kube-system rollout status ds/calico-node --timeout=300s || true
@@ -219,10 +219,10 @@ $install_calico = <<~'SHELL'
     [ -f /opt/cni/bin/calico ] && chmod 755 /opt/cni/bin/calico || true
     [ -f /opt/cni/bin/calico-ipam ] && chmod 755 /opt/cni/bin/calico-ipam || true
   else
-    echo "[INFO] Calico CNI 바이너리 이미 존재하여 보강 생략"
+    echo "[INFO] Calico CNI binaries already present, skipping repair"
   fi
 
-  # k3s current bin 경로를 참조하는 경우도 있어 /opt/cni/bin 내용을 동기화한다.
+  # Some callers still reference the k3s current bin path, so sync /opt/cni/bin into it.
   K3S_CNI_BIN="/var/lib/rancher/k3s/data/current/bin"
   mkdir -p "${K3S_CNI_BIN}"
   cp -af /opt/cni/bin/* "${K3S_CNI_BIN}/"
@@ -232,9 +232,9 @@ $install_calico = <<~'SHELL'
   test -x /opt/cni/bin/macvlan
   test -x /opt/cni/bin/bandwidth
   test -x /opt/cni/bin/portmap
-  echo "CNI 바이너리 확인 완료: calico/calico-ipam/macvlan/bandwidth/portmap"
+  echo "Verified CNI binaries: calico/calico-ipam/macvlan/bandwidth/portmap"
 
-  echo "=== [3/6] 완료 ==="
+  echo "=== [3/6] Done ==="
 SHELL
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -243,29 +243,29 @@ SHELL
 $install_multus = <<~'SHELL'
   set -euo pipefail
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-  echo "=== [4/6] Multus CNI 설치 ==="
+  echo "=== [4/6] Installing Multus CNI ==="
 
   MULTUS_IFACE=$(ip -o addr show | awk '/192\.168\.100\./{print $2}' | head -1)
   if [ -z "${MULTUS_IFACE}" ]; then
-    echo "[ERROR] Multus(server-net) 인터페이스 감지 실패"
+    echo "[ERROR] Failed to detect Multus (server-net) interface"
     ip addr show
     exit 1
   fi
-  echo "Multus server-net master 인터페이스: ${MULTUS_IFACE}"
+  echo "Multus server-net master interface: ${MULTUS_IFACE}"
 
   CLIENT_IFACE=$(ip -o addr show | awk '/10\.0\.10\./{print $2}' | head -1)
   if [ -z "${CLIENT_IFACE}" ]; then
-    echo "[ERROR] Multus(client-net) 인터페이스 감지 실패"
+    echo "[ERROR] Failed to detect Multus (client-net) interface"
     ip addr show
     exit 1
   fi
-  echo "Multus client-net master 인터페이스: ${CLIENT_IFACE}"
+  echo "Multus client-net master interface: ${CLIENT_IFACE}"
 
   kubectl apply -f \
     https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/v4.0.2/deployments/multus-daemonset-thick.yml
 
-  # multus daemon 로그에 /opt/cni/bin not found가 반복되는 케이스 대응:
-  # kube-multus 컨테이너에도 host /opt/cni/bin(cnibin volume)을 직접 마운트한다.
+  # Handle cases where multus daemon logs repeatedly show /opt/cni/bin not found:
+  # directly mount host /opt/cni/bin (cnibin volume) into the kube-multus container as well.
   if ! kubectl -n kube-system get ds kube-multus-ds \
       -o jsonpath='{range .spec.template.spec.containers[?(@.name=="kube-multus")].volumeMounts[*]}{.mountPath}{"\n"}{end}' \
       | grep -qx '/opt/cni/bin'; then
@@ -282,7 +282,7 @@ $install_multus = <<~'SHELL'
     ]'
   fi
 
-  # Multus thick 데몬은 기본 메모리 limit이 낮아 OOMKilled 될 수 있다. 상향 조정.
+  # The Multus thick daemon can be OOMKilled with the default memory limit, so raise it.
   kubectl -n kube-system patch ds kube-multus-ds --type='json' -p='[
     {
       "op": "replace",
@@ -294,7 +294,7 @@ $install_multus = <<~'SHELL'
     }
   ]'
 
-  # multus 서비스어카운트가 cluster-scope pod list/watch를 못해 reflector 에러가 나는 케이스 보강
+  # Add protection for cases where the Multus service account lacks cluster-scope pod list/watch and triggers reflector errors.
   cat >/tmp/multus-extra-rbac.yaml <<'EOF'
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -320,7 +320,7 @@ roleRef:
 EOF
   kubectl apply -f /tmp/multus-extra-rbac.yaml
 
-  echo -n "Multus DaemonSet 대기 중"
+  echo -n "Waiting for Multus DaemonSet"
   for i in $(seq 1 20); do
     kubectl -n kube-system get ds kube-multus-ds > /dev/null 2>&1 && break
     printf "."
@@ -330,7 +330,7 @@ EOF
   kubectl -n kube-system rollout restart ds/kube-multus-ds
   kubectl -n kube-system rollout status ds/kube-multus-ds --timeout=180s
 
-  echo "[INFO] Multus 관점 CNI 바이너리 최종 점검"
+  echo "[INFO] Final CNI binary check from the Multus view"
   CNI_PLUGINS_VER="v1.4.1"
   CNI_TGZ="/opt/cni/cni-plugins-linux-amd64-${CNI_PLUGINS_VER}.tgz"
   MISSING=0
@@ -339,7 +339,7 @@ EOF
   done
 
   if [ "${MISSING}" -eq 1 ]; then
-    echo "[WARN] /opt/cni/bin 누락 감지, 즉시 복구 진행"
+    echo "[WARN] Missing entries detected in /opt/cni/bin, starting immediate recovery"
 
     if [ ! -f "${CNI_TGZ}" ]; then
       curl -sfL \
@@ -381,10 +381,10 @@ EOF
       /hostroot/opt/cni/bin/macvlan /hostroot/opt/cni/bin/bandwidth \
       /hostroot/opt/cni/bin/portmap
   fi
-  echo " 완료"
+  echo " done"
 
-  # NAD — default 네임스페이스 (SCTP Server용)
-  # gateway=LoxiLB IP, route로 client-net 대역을 LoxiLB 경유하도록 설정
+  # NAD — default namespace (for the SCTP server)
+  # Use the LoxiLB IP as the gateway and route the client-net subnet through LoxiLB.
   cat > /tmp/nad-default.yaml <<EOF
 apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
@@ -413,7 +413,7 @@ spec:
 EOF
   kubectl apply -f /tmp/nad-default.yaml
 
-  # NAD — kube-system 네임스페이스 (LoxiLB용)
+  # NAD — kube-system namespace (for LoxiLB)
   cat > /tmp/nad-kube-system.yaml <<EOF
 apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
@@ -439,8 +439,8 @@ spec:
 EOF
   kubectl apply -f /tmp/nad-kube-system.yaml
 
-  # NAD — default 네임스페이스 (SCTP Client용 client-net)
-  # gateway=LoxiLB IP
+  # NAD — default namespace (client-net for the SCTP client)
+  # gateway = LoxiLB IP
   cat > /tmp/nad-client-default.yaml <<EOF
 apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
@@ -466,7 +466,7 @@ spec:
 EOF
   kubectl apply -f /tmp/nad-client-default.yaml
 
-  # NAD — kube-system 네임스페이스 (LoxiLB용 client-net)
+  # NAD — kube-system namespace (client-net for LoxiLB)
   cat > /tmp/nad-client-kube-system.yaml <<EOF
 apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
@@ -492,19 +492,19 @@ spec:
 EOF
   kubectl apply -f /tmp/nad-client-kube-system.yaml
 
-  echo "=== [4/6] 완료 ==="
+  echo "=== [4/6] Done ==="
 SHELL
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 5 — LoxiLB 배포
+# STEP 5 — Deploy LoxiLB
 # ══════════════════════════════════════════════════════════════════════════════
 $deploy_loxilb = <<~'SHELL'
   set -euo pipefail
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-  echo "=== [5/6] LoxiLB 배포 ==="
+  echo "=== [5/6] Deploying LoxiLB ==="
 
-  # loxilb.yml 적용 후 DaemonSet pod template에 Multus 어노테이션을 명시적으로 patch
-  # (sed 주입 실패/위치 오류를 방지)
+  # After applying loxilb.yml, explicitly patch the DaemonSet Pod template with the Multus annotation
+  # to avoid sed injection failures or misplaced edits.
   curl -sfL \
     https://raw.githubusercontent.com/loxilb-io/loxilb/main/cicd/k3s-incluster/loxilb.yml \
     | sed 's|hostNetwork: true|hostNetwork: false|g' \
@@ -513,44 +513,44 @@ $deploy_loxilb = <<~'SHELL'
   kubectl -n kube-system patch ds loxilb-lb --type merge -p \
     '{"spec":{"template":{"metadata":{"annotations":{"k8s.v1.cni.cncf.io/networks":"[{\"name\":\"multus-net\",\"ips\":[\"192.168.100.50/24\"]},{\"name\":\"client-net\",\"ips\":[\"10.0.10.50/24\"]}]"}}}}}'
 
-  echo -n "LoxiLB DaemonSet 대기 중"
+  echo -n "Waiting for LoxiLB DaemonSet"
   for i in $(seq 1 30); do
     kubectl -n kube-system get ds loxilb-lb > /dev/null 2>&1 && break
     printf "."
     sleep 5
   done
   kubectl -n kube-system rollout status ds/loxilb-lb --timeout=300s
-  echo " 완료"
+  echo " done"
 
-  # LB VIP를 client-net 대역의 마지막 IP로 설정
+  # Set the LB VIP to the last IP in the client-net range.
   LB_CIDR="10.0.10.254/32"
-  echo "LB_CIDR 설정: ${LB_CIDR} (client-net 대역)"
+  echo "LB_CIDR configured: ${LB_CIDR} (client-net range)"
 
   curl -sfL \
     https://raw.githubusercontent.com/loxilb-io/loxilb/main/cicd/k3s-incluster/kube-loxilb.yml \
     | sed "s|--cidrPools=defaultPool=.*|--cidrPools=defaultPool=${LB_CIDR}|g" \
     | kubectl apply -f -
 
-  echo -n "kube-loxilb 컨트롤러 대기 중"
+  echo -n "Waiting for kube-loxilb controller"
   for i in $(seq 1 20); do
     kubectl -n kube-system get deploy kube-loxilb > /dev/null 2>&1 && break
     printf "."
     sleep 5
   done
   kubectl -n kube-system rollout status deploy/kube-loxilb --timeout=180s
-  echo " 완료"
+  echo " done"
 
-  echo "=== [5/6] 완료 ==="
+  echo "=== [5/6] Done ==="
 SHELL
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 6 — SCTP Server / Client Pod 배포
-# 내부 heredoc은 'EOF' (따옴표 있음) → 셸 변수 확장 없이 YAML 그대로 전달
+# STEP 6 — Deploy SCTP server/client Pods
+# The inner heredoc uses 'EOF' (quoted) so YAML is passed as-is without shell variable expansion.
 # ══════════════════════════════════════════════════════════════════════════════
 $deploy_apps = <<~'SHELL'
   set -euo pipefail
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-  echo "=== [6/6] SCTP/TCP 앱 배포 ==="
+  echo "=== [6/6] Deploying SCTP/TCP apps ==="
 
   # SCTP Server Pod
   cat > /tmp/sctp-server.yaml <<'EOF'
@@ -573,7 +573,7 @@ spec:
     - |
       apt-get update -qq &&
       apt-get install -y -qq lksctp-tools iproute2 iputils-ping &&
-      echo "=== SCTP Server 시작 ===" &&
+      echo "=== Starting SCTP server ===" &&
       sctp_darn -H 0.0.0.0 -P 36412 -l
     ports:
     - containerPort: 36412
@@ -626,7 +626,7 @@ spec:
     - |
       apt-get update -qq &&
       apt-get install -y -qq lksctp-tools iproute2 iputils-ping &&
-      echo "=== SCTP Client 준비 완료 ===" &&
+      echo "=== SCTP client ready ===" &&
       sleep infinity
     securityContext:
       capabilities:
@@ -655,7 +655,7 @@ spec:
     - |
       apt-get update -qq &&
       apt-get install -y -qq socat iproute2 &&
-      echo "=== TCP Server 시작 ===" &&
+      echo "=== Starting TCP server ===" &&
       socat -d -d TCP-LISTEN:38080,reuseaddr,fork SYSTEM:'/bin/cat'
     ports:
     - containerPort: 38080
@@ -708,7 +708,7 @@ spec:
     - |
       apt-get update -qq &&
       apt-get install -y -qq netcat-openbsd iproute2 iputils-ping &&
-      echo "=== TCP Client 준비 완료 ===" &&
+      echo "=== TCP client ready ===" &&
       sleep infinity
     securityContext:
       capabilities:
@@ -722,23 +722,23 @@ EOF
     local timeout_sec=300
     local elapsed=0
 
-    echo -n "${pod_name} 대기 중"
+    echo -n "Waiting for ${pod_name}"
     while [ "${elapsed}" -lt "${timeout_sec}" ]; do
       local ready
       ready=$(kubectl -n "${namespace}" get pod "${pod_name}" \
         -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
 
       if [ "${ready}" = "True" ]; then
-        echo " 완료"
+        echo " ready"
         return 0
       fi
 
-      # ImagePull 오류, CNI 플러그인 누락 등 영구 오류만 즉시 실패
-      # FailedCreatePodSandBox / failed to setup network 는 Multus 데몬
-      # 일시 불안정으로 발생할 수 있으므로 재시도를 허용한다.
+      # Fail fast only on permanent errors such as ImagePull failures or missing CNI plugins.
+      # FailedCreatePodSandBox / failed to setup network can be caused by transient Multus daemon instability,
+      # so retries are allowed in those cases.
       if kubectl -n "${namespace}" describe pod "${pod_name}" 2>/dev/null | \
           grep -Eqi 'failed to find plugin|ImagePullBackOff|ErrImagePull'; then
-        echo " [FAIL] 즉시 종료"
+        echo " [FAIL] aborting early"
         echo "----- describe pod/${pod_name} -----"
         kubectl -n "${namespace}" describe pod "${pod_name}" || true
         echo "----- recent events (default ns) -----"
@@ -766,7 +766,7 @@ EOF
 
   echo ""
   echo "=================================================="
-  echo " Testbed 구성 완료!"
+  echo " Testbed setup complete!"
   echo "=================================================="
   kubectl get nodes -o wide
   echo ""
@@ -775,29 +775,29 @@ EOF
   kubectl get svc
   echo ""
   echo "=================================================="
-  echo " 테스트 방법 (vagrant ssh 후)"
+  echo " How to test (after vagrant ssh)"
   echo "=================================================="
-  echo " # VIP 확인"
+  echo " # Check VIP"
   echo " kubectl get svc sctp-server-svc"
   echo ""
-  echo " # Server Multus IP 확인"
+  echo " # Check server Multus IP"
   echo " kubectl exec sctp-server -- ip addr show net1"
   echo ""
-  echo " # SCTP 연결 테스트"
+  echo " # SCTP connectivity test"
   echo ' LB_VIP=$(kubectl get svc sctp-server-svc -o jsonpath='"'"'{.status.loadBalancer.ingress[0].ip}'"'"' 2>/dev/null || true); [ -n "$LB_VIP" ] || LB_VIP=$(kubectl get svc sctp-server-svc -o jsonpath='"'"'{.status.loadBalancer.ingress[0].hostname}'"'"' 2>/dev/null || true); LB_VIP=${LB_VIP#llb-}'
-  echo " # Client의 client-net IP(net1)를 소스로 사용"
+  echo " # Use the client's client-net IP (net1) as the source"
   echo " kubectl exec -it sctp-client -- sctp_darn -H 10.0.10.110 -h \${LB_VIP} -P 36412 -p 36412 -s"
   echo ""
-  echo " # LoxiLB 규칙 확인"
+  echo " # Check LoxiLB rules"
   echo ' LOXILB_POD=$(kubectl get pods -n kube-system -l app=loxilb-app -o jsonpath='"'"'{.items[0].metadata.name}'"'"')'
   echo " kubectl exec -n kube-system \${LOXILB_POD} -- loxicmd get lb"
   echo "=================================================="
-  echo "=== [6/6] 완료 ==="
+  echo "=== [6/6] Done ==="
 SHELL
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 7 — 배포 점검 및 리포트 내보내기 (/vagrant/checks)
-# VM 외부(호스트)에서 결과 확인 가능
+# STEP 7 — Deployment verification and report export (/vagrant/checks)
+# Results can be inspected from outside the VM on the host.
 # ══════════════════════════════════════════════════════════════════════════════
 $verify_deploy = <<~'SHELL'
   set -euo pipefail
@@ -814,7 +814,7 @@ $verify_deploy = <<~'SHELL'
   mkdir -p "${REPORT_DIR}"
   exec > >(tee -a "${REPORT_FILE}") 2>&1
 
-  echo "=== [7/7] 배포 점검 시작 ==="
+  echo "=== [7/7] Deployment verification start ==="
   echo "time=${TS}"
 
   FAIL_COUNT=0
@@ -834,7 +834,7 @@ $verify_deploy = <<~'SHELL'
   : > "${SUMMARY_FILE}"
   printf "REPORT_FILE=%s\n" "${REPORT_FILE}" >> "${SUMMARY_FILE}"
 
-  echo "\n[1] CNI 바이너리 확인"
+  echo "\n[1] Check CNI binaries"
   CALICO_BIN="FAIL"
   STD_CNI_BIN="FAIL"
   K3S_CNI_SYNC="FAIL"
@@ -865,12 +865,12 @@ $verify_deploy = <<~'SHELL'
   fi
   check_ok "MULTUS_VIEW_CNI" "${MULTUS_VIEW_CNI}"
 
-  echo "\n[2] Kubernetes 리소스 상태"
+  echo "\n[2] Kubernetes resource status"
   kubectl get nodes -o wide || true
   kubectl get pods -A -o wide || true
   kubectl get net-attach-def -A || true
 
-  echo "\n[3] LoxiLB Multus 어노테이션 확인"
+  echo "\n[3] Check LoxiLB Multus annotation"
   LOXI_DS_NETS="$(kubectl -n kube-system get ds loxilb-lb -o jsonpath='{.spec.template.metadata.annotations.k8s\.v1\.cni\.cncf\.io/networks}' 2>/dev/null || true)"
   echo "loxilb ds annotation: ${LOXI_DS_NETS}"
   if echo "${LOXI_DS_NETS}" | grep -q "multus-net" && echo "${LOXI_DS_NETS}" | grep -q "client-net" && echo "${LOXI_DS_NETS}" | grep -q "192.168.100.50" && echo "${LOXI_DS_NETS}" | grep -q "10.0.10.50"; then
@@ -879,7 +879,7 @@ $verify_deploy = <<~'SHELL'
     check_ok "LOXILB_DS_MULTUS_ANNOTATION" "FAIL"
   fi
 
-  echo "\n[4] Pod net1 인터페이스 확인"
+  echo "\n[4] Check Pod net1 interface"
   SCTP_SERVER_NET1="FAIL"
   for i in $(seq 1 10); do
     if kubectl exec sctp-server -- ip -o -4 addr show dev net1 >/dev/null 2>&1; then
@@ -918,11 +918,11 @@ $verify_deploy = <<~'SHELL'
   check_ok "LOXILB_POD_NET1" "${LOXILB_POD_NET1}"
   check_ok "LOXILB_POD_NET2" "${LOXILB_POD_NET2}"
 
-  echo "\n[5] 최근 네트워크 관련 경고 이벤트"
+  echo "\n[5] Recent network-related warning events"
   kubectl get events -A --sort-by=.lastTimestamp 2>/dev/null \
     | grep -E "FailedCreatePodSandBox|failed to find plugin|multus-shim|calico" || true
 
-  echo "\n[6] Multus RBAC 확인"
+  echo "\n[6] Check Multus RBAC"
   MULTUS_RBAC="FAIL"
   if kubectl auth can-i --as=system:serviceaccount:kube-system:multus list pods --all-namespaces >/dev/null 2>&1; then
     MULTUS_RBAC="PASS"
@@ -937,104 +937,104 @@ $verify_deploy = <<~'SHELL'
   fi
   printf "OVERALL=%s\n" "${OVERALL}" >> "${SUMMARY_FILE}"
 
-  # latest-summary.env를 기반으로 실패 항목별 원인/조치 가이드 생성
+  # Generate a cause/action guide per failed item from latest-summary.env.
   {
-    echo "# Multus/LoxiLB 자동 진단"
+    echo "# Multus/LoxiLB automated diagnosis"
     echo "time=${TS}"
     echo "overall=${OVERALL}"
     echo ""
 
     if [ "${OVERALL}" = "PASS" ]; then
-      echo "모든 체크가 PASS입니다."
-      echo "추가 조치가 필요하지 않습니다."
+      echo "All checks passed."
+      echo "No additional action is required."
     else
       # shellcheck disable=SC1090
       . "${SUMMARY_FILE}"
 
-      echo "실패 항목별 가이드:"
+      echo "Guide by failed item:"
       echo ""
 
       if [ "${CALICO_BIN:-FAIL}" != "PASS" ]; then
         echo "[CALICO_BIN]"
-        echo "- 원인: /opt/cni/bin 에 calico 또는 calico-ipam 바이너리 누락"
-        echo "- 영향: Multus 기본(delegate) CNI 호출 시 FailedCreatePodSandBox 발생"
-        echo "- 조치: calico-node pod에서 /opt/cni/bin/calico* 복구 후 chmod 755 적용"
+        echo "- Cause: Missing calico or calico-ipam binaries under /opt/cni/bin"
+        echo "- Impact: FailedCreatePodSandBox can occur when Multus calls the default delegate CNI"
+        echo "- Action: Restore /opt/cni/bin/calico* from the calico-node Pod and apply chmod 755"
         echo ""
       fi
 
       if [ "${STD_CNI_BIN:-FAIL}" != "PASS" ]; then
         echo "[STD_CNI_BIN]"
-        echo "- 원인: /opt/cni/bin 에 macvlan/bandwidth/portmap 표준 CNI 바이너리 누락"
-        echo "- 영향: Multus DEL/ADD 단계에서 macvlan, bandwidth 플러그인 호출 실패"
-        echo "- 조치: containernetworking/plugins tgz 재압축 해제 후 바이너리 권한 확인"
+        echo "- Cause: Missing standard CNI binaries macvlan/bandwidth/portmap under /opt/cni/bin"
+        echo "- Impact: Multus DEL/ADD steps can fail when invoking macvlan or bandwidth plugins"
+        echo "- Action: Re-extract the containernetworking/plugins tgz and verify binary permissions"
         echo ""
       fi
 
       if [ "${K3S_CNI_SYNC:-FAIL}" != "PASS" ]; then
         echo "[K3S_CNI_SYNC]"
-        echo "- 원인: /opt/cni/bin 과 /var/lib/rancher/k3s/data/current/bin 간 플러그인 불일치"
-        echo "- 영향: 호출 주체에 따라 플러그인 탐색 경로가 달라 간헐 실패 발생"
-        echo "- 조치: /opt/cni/bin 내용을 k3s current bin 경로로 동기화"
+        echo "- Cause: Plugin mismatch between /opt/cni/bin and /var/lib/rancher/k3s/data/current/bin"
+        echo "- Impact: Intermittent failures can occur because plugin lookup paths differ by caller"
+        echo "- Action: Sync /opt/cni/bin into the k3s current bin path"
         echo ""
       fi
 
       if [ "${MULTUS_VIEW_CNI:-FAIL}" != "PASS" ]; then
         echo "[MULTUS_VIEW_CNI]"
-        echo "- 원인: VM에서 파일이 있어도 multus pod(/hostroot) 관점에서 CNI 바이너리가 보이지 않음"
-        echo "- 영향: multus ADD/DEL 시 macvlan/bandwidth/calico not found 오류 발생"
-        echo "- 조치: kube-multus-ds 재시작 후 /hostroot/opt/cni/bin 경로 재검증"
+        echo "- Cause: CNI binaries exist on the VM but are not visible from the Multus Pod (/hostroot)"
+        echo "- Impact: multus ADD/DEL can fail with macvlan/bandwidth/calico not found errors"
+        echo "- Action: Restart kube-multus-ds and re-check /hostroot/opt/cni/bin"
         echo ""
       fi
 
       if [ "${LOXILB_DS_MULTUS_ANNOTATION:-FAIL}" != "PASS" ]; then
         echo "[LOXILB_DS_MULTUS_ANNOTATION]"
-        echo "- 원인: loxilb DaemonSet Pod template에 Multus networks annotation 미적용"
-        echo "- 영향: loxilb pod에 net1 인터페이스가 생성되지 않음"
-        echo "- 조치: ds/loxilb-lb에 k8s.v1.cni.cncf.io/networks=multus-net patch 적용"
+        echo "- Cause: Multus networks annotation is missing from the loxilb DaemonSet Pod template"
+        echo "- Impact: The loxilb Pod does not get a net1 interface"
+        echo "- Action: Patch ds/loxilb-lb with k8s.v1.cni.cncf.io/networks=multus-net"
         echo ""
       fi
 
       if [ "${SCTP_SERVER_NET1:-FAIL}" != "PASS" ]; then
         echo "[SCTP_SERVER_NET1]"
-        echo "- 원인: sctp-server pod의 Multus 첨부 실패 또는 NAD 설정 불일치"
-        echo "- 영향: server가 multus 대역(192.168.100.0/24)으로 수신 불가"
-        echo "- 조치: pod annotation, NAD(default/multus-net), multus ds 상태 재확인"
+        echo "- Cause: Multus attachment failed for the sctp-server Pod or the NAD configuration does not match"
+        echo "- Impact: The server cannot receive traffic on the multus range (192.168.100.0/24)"
+        echo "- Action: Re-check the Pod annotation, NAD(default/multus-net), and Multus DaemonSet status"
         echo ""
       fi
 
       if [ "${LOXILB_POD_NET1:-FAIL}" != "PASS" ]; then
         echo "[LOXILB_POD_NET1]"
-        echo "- 원인: loxilb pod Multus 첨부 실패 또는 kube-system NAD 부재"
-        echo "- 영향: loxilb → server 경로(multus-net)가 형성되지 않음"
-        echo "- 조치: NAD(kube-system/multus-net), loxilb pod 재시작, 이벤트 점검"
+        echo "- Cause: Multus attachment failed for the loxilb Pod or the kube-system NAD is missing"
+        echo "- Impact: The loxilb -> server path (multus-net) is not formed"
+        echo "- Action: Check NAD(kube-system/multus-net), restart the loxilb Pod, and inspect events"
         echo ""
       fi
 
       if [ "${LOXILB_POD_NET2:-FAIL}" != "PASS" ]; then
         echo "[LOXILB_POD_NET2]"
-        echo "- 원인: loxilb pod에 client-net Multus 첨부 실패"
-        echo "- 영향: client → loxilb 경로(client-net)가 형성되지 않음"
-        echo "- 조치: NAD(kube-system/client-net), loxilb ds annotation 확인, 이벤트 점검"
+        echo "- Cause: client-net Multus attachment failed on the loxilb Pod"
+        echo "- Impact: The client -> loxilb path (client-net) is not formed"
+        echo "- Action: Check NAD(kube-system/client-net), verify the loxilb DS annotation, and inspect events"
         echo ""
       fi
 
       if [ "${SCTP_CLIENT_NET1:-FAIL}" != "PASS" ]; then
         echo "[SCTP_CLIENT_NET1]"
-        echo "- 원인: sctp-client pod의 client-net Multus 첨부 실패"
-        echo "- 영향: client가 client-net 대역(10.0.10.0/24)으로 LB VIP 접근 불가"
-        echo "- 조치: pod annotation, NAD(default/client-net), multus ds 상태 재확인"
+        echo "- Cause: client-net Multus attachment failed on the sctp-client Pod"
+        echo "- Impact: The client cannot reach the LB VIP through the client-net range (10.0.10.0/24)"
+        echo "- Action: Re-check the Pod annotation, NAD(default/client-net), and Multus DaemonSet status"
         echo ""
       fi
 
       if [ "${MULTUS_RBAC:-FAIL}" != "PASS" ]; then
         echo "[MULTUS_RBAC]"
-        echo "- 원인: system:serviceaccount:kube-system:multus 의 cluster-scope pod list/watch 권한 부족"
-        echo "- 영향: multus reflector 에러 지속, 상태 추적 및 정리 로직 불안정"
-        echo "- 조치: multus SA에 pods/events/nodes/namespaces get/list/watch ClusterRoleBinding 추가"
+        echo "- Cause: system:serviceaccount:kube-system:multus lacks cluster-scope pod list/watch permissions"
+        echo "- Impact: Multus reflector errors persist and status tracking/cleanup logic becomes unstable"
+        echo "- Action: Add a ClusterRoleBinding granting the Multus SA get/list/watch on pods/events/nodes/namespaces"
         echo ""
       fi
 
-      echo "추천 확인 명령:"
+      echo "Recommended verification commands:"
       echo "- kubectl get net-attach-def -A"
       echo "- kubectl -n kube-system describe ds loxilb-lb"
       echo "- kubectl describe pod sctp-server"
@@ -1046,14 +1046,14 @@ $verify_deploy = <<~'SHELL'
   cp -f "${DIAG_TS_FILE}" "${DIAG_FILE}"
   echo "${REPORT_FILE}" > "${REPORT_DIR}/latest-path.txt"
 
-  echo "\n=== [7/7] 배포 점검 완료: ${OVERALL} ==="
-  echo "host 확인 경로: ${LATEST_FILE}"
-  echo "host 요약 경로: ${SUMMARY_FILE}"
-  echo "host 진단 경로: ${DIAG_FILE}"
+  echo "\n=== [7/7] Deployment verification complete: ${OVERALL} ==="
+  echo "host log path: ${LATEST_FILE}"
+  echo "host summary path: ${SUMMARY_FILE}"
+  echo "host diagnosis path: ${DIAG_FILE}"
 SHELL
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Vagrant 설정
+# Vagrant configuration
 # ══════════════════════════════════════════════════════════════════════════════
 Vagrant.configure("2") do |config|
 
@@ -1061,7 +1061,7 @@ Vagrant.configure("2") do |config|
     node.vm.box      = "bento/ubuntu-24.04"
     node.vm.hostname = "loxilb-k8s"
 
-    # eth1: K8s 관리 네트워크 (k3s advertise-address)
+    # eth1: Kubernetes management network (k3s advertise-address)
     node.vm.network "private_network", ip: NODE_IP
 
     # eth2: Multus server-net (macvlan master, LoxiLB ↔ SCTP Server)
@@ -1079,7 +1079,7 @@ Vagrant.configure("2") do |config|
       vb.memory = 4096
       vb.cpus   = 4
       vb.gui    = false
-      # macvlan 동작을 위해 promiscuous 모드 필수
+      # Promiscuous mode is required for macvlan to work.
       vb.customize ["modifyvm", :id, "--nicpromisc3", "allow-all"]  # eth2 (server-net)
       vb.customize ["modifyvm", :id, "--nicpromisc4", "allow-all"]  # eth3 (client-net)
       vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
@@ -1098,12 +1098,12 @@ Vagrant.configure("2") do |config|
     node.vm.provision "shell", name: "5-loxilb", inline: $deploy_loxilb
     node.vm.provision "shell", name: "6-apps",   inline: $deploy_apps
     node.vm.provision "shell", name: "7-verify", inline: $verify_deploy
-    # 테스트 스크립트: provision 시 자동 실행 + VM 내 /home/vagrant/run-tests.sh 로 설치
+    # Test script: run automatically during provision and install as /home/vagrant/run-tests.sh inside the VM.
     node.vm.provision "shell", name: "8-functional-tests", path: "scripts/post-provision-functional-tests.sh"
     node.vm.provision "shell", name: "9-test-script-hint", inline: <<~'HINT'
       echo ""
       echo "════════════════════════════════════════════════════════════════"
-      echo " VM 내부에서 테스트 재실행:"
+      echo " Re-run tests inside the VM:"
       echo "   vagrant ssh"
       echo "   sudo /home/vagrant/run-tests.sh"
       echo "════════════════════════════════════════════════════════════════"

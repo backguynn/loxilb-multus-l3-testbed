@@ -10,7 +10,7 @@
 #                                                       ▼
 #                                                  SCTP/TCP Server
 #
-# Usage (vagrant 내부):
+# Usage (inside the VM):
 #   sudo /home/vagrant/run-tests.sh
 # ──────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
@@ -25,18 +25,18 @@ LATEST_FILE="${REPORT_DIR}/latest-functional-tests.log"
 mkdir -p "${REPORT_DIR}"
 exec > >(tee -a "${REPORT_FILE}") 2>&1
 
-# VM 안에 스크립트를 설치 (vagrant provision 시 자동, 수동 실행 시 skip)
+# Install the script inside the VM (automatic during vagrant provision, skipped on manual runs).
 INSTALL_PATH="/home/vagrant/run-tests.sh"
 SELF="$(realpath "$0" 2>/dev/null || echo "$0")"
 if [[ "${SELF}" != "$(realpath "${INSTALL_PATH}" 2>/dev/null || echo "")" ]]; then
   cp -f "${SELF}" "${INSTALL_PATH}"
   chmod 755 "${INSTALL_PATH}"
   chown vagrant:vagrant "${INSTALL_PATH}" 2>/dev/null || true
-  echo "[INFO] 테스트 스크립트 설치됨: ${INSTALL_PATH}"
+  echo "[INFO] Test script installed: ${INSTALL_PATH}"
 fi
 
 echo "═══════════════════════════════════════════════════════════"
-echo " LoxiLB Multus E2E 기능 테스트"
+echo " LoxiLB Multus E2E functional test"
 echo " ${TS}"
 echo "═══════════════════════════════════════════════════════════"
 
@@ -58,7 +58,7 @@ record() {
 
 wait_ready() {
   local ns="$1" pod="$2" timeout_sec=180 elapsed=0
-  echo -n "[wait] ${ns}/${pod} Ready 대기"
+  echo -n "[wait] waiting for ${ns}/${pod} to become Ready"
   while [[ "${elapsed}" -lt "${timeout_sec}" ]]; do
     local ready
     ready=$(kubectl -n "${ns}" get pod "${pod}" \
@@ -93,7 +93,7 @@ wait_lb_ip() {
         -o jsonpath='{.spec.externalIPs[0]}' 2>/dev/null || true)
     fi
     if [[ -n "${ip}" ]]; then
-      # kube-loxilb 이 "llb-" 접두어를 붙이는 경우 제거
+      # Strip the "llb-" prefix when kube-loxilb returns it.
       echo "${ip#llb-}"
       return 0
     fi
@@ -112,7 +112,7 @@ get_multus_ip() {
 
 # ── Pod readiness ─────────────────────────────────────────────────────────────
 echo ""
-echo "── Pod 준비 상태 확인 ──"
+echo "── Checking Pod readiness ──"
 wait_ready default sctp-server
 wait_ready default sctp-client
 wait_ready default tcp-server
@@ -128,7 +128,7 @@ wait_ready kube-system "${LOXILB_POD}"
 
 # ── Collect IPs ───────────────────────────────────────────────────────────────
 echo ""
-echo "── IP 정보 수집 ──"
+echo "── Collecting IP information ──"
 SCTP_CLIENT_NET1=$(get_multus_ip default sctp-client net1)
 SCTP_SERVER_NET1=$(get_multus_ip default sctp-server net1)
 TCP_CLIENT_NET1=$(get_multus_ip default tcp-client net1)
@@ -149,10 +149,10 @@ echo "SCTP VIP                      : ${SCTP_VIP:-<none>}"
 echo "TCP  VIP                      : ${TCP_VIP:-<none>}"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [1] Multus 인터페이스 확인
+# [1] Check Multus interfaces
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "── [1] Multus 인터페이스 확인 ──"
+echo "── [1] Checking Multus interfaces ──"
 
 [[ -n "${SCTP_CLIENT_NET1}" ]] \
   && record "SCTP_CLIENT_NET1" "PASS" "${SCTP_CLIENT_NET1}" \
@@ -175,11 +175,11 @@ echo "── [1] Multus 인터페이스 확인 ──"
   || record "LOXILB_MULTUS" "FAIL" "net1=${LOXILB_NET1:-<none>}, net2=${LOXILB_NET2:-<none>}"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [2] Server → client-net 라우팅 확인
-#    Server 가 10.0.10.0/24 대역을 LoxiLB(192.168.100.50) 경유하는지 검증
+# [2] Check server -> client-net routing
+#    Verify that the server reaches 10.0.10.0/24 through LoxiLB (192.168.100.50).
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "── [2] Server → client-net 라우팅 확인 ──"
+echo "── [2] Checking server → client-net routing ──"
 
 if kubectl exec sctp-server -- ip route show 10.0.10.0/24 2>/dev/null | grep -q "${LOXILB_NET1:-x}"; then
   record "SERVER_ROUTE" "PASS" "10.0.10.0/24 via ${LOXILB_NET1}"
@@ -190,11 +190,11 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [3] Multus L2 ping 확인
-#    같은 macvlan bridge 위에서 Pod ↔ LoxiLB 간 L2 통신 가능 여부
+# [3] Check Multus L2 ping
+#    Verify L2 connectivity between Pods and LoxiLB on the same macvlan bridge.
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "── [3] Multus L2 ping 확인 ──"
+echo "── [3] Checking Multus L2 ping ──"
 
 if kubectl exec sctp-client -- ping -c 2 -W 3 "${LOXILB_NET2:-10.0.10.50}" >/dev/null 2>&1; then
   record "CLIENT_PING_LOXILB" "PASS" "client → loxilb(${LOXILB_NET2}) on client-net"
@@ -209,10 +209,10 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [4] LoxiLB LB 규칙 확인
+# [4] Check LoxiLB LB rules
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "── [4] LoxiLB LB 규칙 확인 ──"
+echo "── [4] Checking LoxiLB LB rules ──"
 
 LB_RULES=$(kubectl -n kube-system exec "${LOXILB_POD}" -- loxicmd get lb 2>/dev/null || true)
 echo "${LB_RULES}"
@@ -241,9 +241,9 @@ elif [[ -z "${SCTP_CLIENT_NET1}" ]]; then
   record "SCTP_E2E" "FAIL" "client net1 IP not available"
 else
   # sctp_darn -H <bind_ip> -h <dest_ip> -P <src_port> -p <dst_port> -s
-  # client-net IP를 bind 하여 Multus 경로 사용을 강제한다.
-  # sctp_darn 은 association 성립 후에도 timeout 종료로 비정상 exit 할 수 있어,
-  # 종료 코드 대신 SCTP_COMM_UP 이벤트를 성공 신호로 판정한다.
+  # Bind the client-net IP to force traffic over the Multus path.
+  # sctp_darn can still exit non-zero after the association is established because of timeout,
+  # so use the SCTP_COMM_UP event as the success signal instead of the process exit code.
   SCTP_E2E_OUTPUT=$(kubectl exec sctp-client -- sh -c \
     "printf 'sctp-e2e-test\n' | timeout 10 sctp_darn -H ${SCTP_CLIENT_NET1} -h ${SCTP_VIP} -P 36412 -p 36412 -s" \
     2>&1 || true)
@@ -273,7 +273,7 @@ if [[ -z "${TCP_VIP}" ]]; then
 elif [[ -z "${TCP_CLIENT_NET1}" ]]; then
   record "TCP_E2E" "FAIL" "client net1 IP not available"
 else
-  # nc -s <bind_ip> 로 client-net 경로 강제
+  # Use nc -s <bind_ip> to force the client-net path.
   if kubectl exec tcp-client -- sh -c \
     "printf 'tcp-e2e-ok\n' | timeout 10 nc -s ${TCP_CLIENT_NET1} -w 5 ${TCP_VIP} 38080" \
     2>/dev/null | grep -q 'tcp-e2e-ok'; then
@@ -290,11 +290,11 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-echo " 결과: PASS=${pass_count}  FAIL=${fail_count}"
+echo " Result: PASS=${pass_count}  FAIL=${fail_count}"
 if [[ "${fail_count}" -eq 0 ]]; then
-  echo " 모든 테스트 통과!"
+  echo " All tests passed!"
 else
-  echo " 일부 테스트 실패 — 위 로그를 확인하세요."
+  echo " Some tests failed — check the log above."
 fi
 echo "═══════════════════════════════════════════════════════════"
 
@@ -302,4 +302,4 @@ cp -f "${REPORT_FILE}" "${LATEST_FILE}"
 echo "report: ${LATEST_FILE}"
 
 echo ""
-echo "※ VM 내부에서 재실행: sudo /home/vagrant/run-tests.sh"
+echo "Note: Re-run inside the VM with: sudo /home/vagrant/run-tests.sh"
