@@ -1,0 +1,18 @@
+# Vagrant local state
+.vagrant/
+
+# Generated logs and diagnosis artifacts
+checks/*.log
+checks/*.txt
+checks/*.env
+
+# Keep the directory structure, but ignore generated outputs by default.
+!checks/
+
+# Optional backups and editor leftovers
+*.swp
+*.swo
+*~
+
+# Local backup files
+Vagrantfile.back
