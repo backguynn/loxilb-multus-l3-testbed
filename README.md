@@ -40,13 +40,18 @@ The first build usually takes about 10 to 15 minutes depending on network speed.
 Topology used by the functional tests:
 
 ```text
-SCTP Client Pod
-  |- [Multus: 10.0.10.x]
-  v
-LoxiLB (VIP: 10.0.10.254)
-  |- [Multus: 192.168.100.x]
-  v
-SCTP Server Pod
+SCTP Client Pod                    TCP Client Pod
+  [Multus: 10.0.10.110]             [Multus: 10.0.10.111]
+            |                                  |
+            v                                  v
+LoxiLB                               LoxiLB
+  [client-net: 10.0.10.50]             [client-net: 10.0.10.50]
+  [server-net: 192.168.100.50]         [server-net: 192.168.100.50]
+  [VIP: 10.0.10.254]                   [VIP: 10.0.10.254]
+            |                                  |
+            v                                  v
+SCTP Server Pod                    TCP Server Pod
+  [Multus: 192.168.100.110]         [Multus: 192.168.100.111]
 ```
 
 The functional test script checks the following items:

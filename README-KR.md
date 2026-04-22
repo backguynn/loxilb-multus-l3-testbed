@@ -40,13 +40,18 @@ sudo /home/vagrant/run-tests.sh
 기능 테스트에서 사용하는 토폴로지는 아래와 같다.
 
 ```text
-SCTP Client Pod
-  |- [Multus: 10.0.10.x]
-  v
-LoxiLB (VIP: 10.0.10.254)
-  |- [Multus: 192.168.100.x]
-  v
-SCTP Server Pod
+SCTP Client Pod                    TCP Client Pod
+  [Multus: 10.0.10.110]             [Multus: 10.0.10.111]
+            |                                  |
+            v                                  v
+LoxiLB                               LoxiLB
+  [client-net: 10.0.10.50]             [client-net: 10.0.10.50]
+  [server-net: 192.168.100.50]         [server-net: 192.168.100.50]
+  [VIP: 10.0.10.254]                   [VIP: 10.0.10.254]
+            |                                  |
+            v                                  v
+SCTP Server Pod                    TCP Server Pod
+  [Multus: 192.168.100.110]         [Multus: 192.168.100.111]
 ```
 
 기능 테스트 스크립트는 아래 항목을 점검한다.
