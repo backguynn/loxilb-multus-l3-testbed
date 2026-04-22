@@ -1,31 +1,31 @@
 # LoxiLB Multus SCTP/TCP Vagrant Testbed
 
-이 프로젝트는 단일 VM 안에 k3s, Calico, Multus, LoxiLB를 구성하고, SCTP/TCP E2E 테스트까지 자동으로 수행하는 Vagrant 기반 테스트베드다.
+This project is a Vagrant-based testbed that provisions k3s, Calico, Multus, and LoxiLB inside a single VM and runs SCTP/TCP end-to-end checks automatically.
 
-## 포함 내용
+## What It Includes
 
-- k3s 단일 노드 클러스터
-- Calico primary CNI
-- Multus secondary CNI
-- LoxiLB + kube-loxilb
-- SCTP/TCP client/server Pod 및 LoadBalancer Service
-- 자동 기능 테스트 스크립트
+- Single-node k3s cluster
+- Calico as the primary CNI
+- Multus as the secondary CNI
+- LoxiLB and kube-loxilb
+- SCTP/TCP client and server Pods with LoadBalancer Services
+- Automated functional test script
 
-## 요구 사항
+## Requirements
 
-- Linux, macOS, 또는 Windows + WSL2
+- Linux, macOS, or Windows with WSL2
 - Vagrant
-- VirtualBox 또는 libvirt
-- 인터넷 연결
-- 최소 4 vCPU, 4 GB RAM 권장
+- VirtualBox or libvirt
+- Internet access
+- At least 4 vCPUs and 4 GB RAM recommended
 
-## 파일 구성
+## Project Layout
 
-- [Vagrantfile](Vagrantfile): 전체 환경 구성 및 앱 배포
-- [scripts/post-provision-functional-tests.sh](scripts/post-provision-functional-tests.sh): 프로비저닝 후 기능 테스트 스크립트
-- [checks](checks): 실행 후 생성되는 진단 및 테스트 로그
+- [Vagrantfile](Vagrantfile): full environment provisioning and app deployment
+- [scripts/post-provision-functional-tests.sh](scripts/post-provision-functional-tests.sh): post-provision functional test runner
+- [checks](checks): generated diagnosis and test logs
 
-## 빠른 시작
+## Quick Start
 
 ```bash
 vagrant up
@@ -33,62 +33,38 @@ vagrant ssh
 sudo /home/vagrant/run-tests.sh
 ```
 
-최초 구성은 네트워크 다운로드 환경에 따라 약 10~15분 정도 걸릴 수 있다.
+The first build usually takes about 10 to 15 minutes depending on network speed.
 
-## 테스트 시나리오
+## Test Scenarios
 
-기능 테스트 스크립트는 아래 항목을 점검한다.
+Topology used by the functional tests:
 
-1. Multus 인터페이스 부착 여부
-2. server에서 client-net 대역으로의 라우팅 여부
-3. Pod와 LoxiLB 간 L2 ping 통신 여부
-4. LoxiLB LB rule 생성 여부
-5. SCTP client -> VIP -> LoxiLB -> server E2E 여부
-6. TCP client -> VIP -> LoxiLB -> server E2E 여부
-
-## 실행 결과 확인
-
-- 최신 기능 테스트 로그: [checks/latest-functional-tests.log](checks/latest-functional-tests.log)
-- 최신 배포 진단 로그: [checks/latest-diagnosis.txt](checks/latest-diagnosis.txt)
-- 기능 테스트 재실행: VM 내부에서 `sudo /home/vagrant/run-tests.sh`
-
-## 공유 방법
-
-이 프로젝트는 완성된 VM 이미지를 전달하기보다 소스 그대로 공유하는 방식이 적합하다.
-
-### 권장 배포물
-
-- [Vagrantfile](Vagrantfile)
-- [scripts/post-provision-functional-tests.sh](scripts/post-provision-functional-tests.sh)
-- 이 README
-
-### 보통 제외할 항목
-
-- `.vagrant/`
-- `checks/` 아래 실행 로그와 진단 결과
-- 개인 실험 중 생성한 임시 파일
-
-### 압축 배포 예시
-
-```bash
-tar czf loxilb-sctp-testbed.tar.gz \
-  Vagrantfile \
-  README.md \
-  scripts/
+```text
+SCTP Client Pod
+  |- [Multus: 10.0.10.x]
+  v
+LoxiLB (VIP: 10.0.10.254)
+  |- [Multus: 192.168.100.x]
+  v
+SCTP Server Pod
 ```
 
-샘플 결과 로그를 함께 전달하고 싶다면 필요한 파일만 선택적으로 포함하면 된다.
+The functional test script checks the following items:
 
-```bash
-tar czf loxilb-sctp-testbed-with-samples.tar.gz \
-  Vagrantfile \
-  README.md \
-  scripts/ \
-  checks/latest-functional-tests.log \
-  checks/latest-diagnosis.txt
-```
+1. Multus interface attachment
+2. Server routing toward the client-net subnet
+3. L2 ping reachability between Pods and LoxiLB
+4. LoxiLB load-balancing rule creation
+5. SCTP client -> VIP -> LoxiLB -> server E2E connectivity
+6. TCP client -> VIP -> LoxiLB -> server E2E connectivity
 
-## 수동 점검 예시
+## Result Files
+
+- Latest functional test log: [checks/latest-functional-tests.log](checks/latest-functional-tests.log)
+- Latest deployment diagnosis log: [checks/latest-diagnosis.txt](checks/latest-diagnosis.txt)
+- Re-run functional tests inside the VM with `sudo /home/vagrant/run-tests.sh`
+
+## Manual Verification Example
 
 ```bash
 kubectl get svc sctp-server-svc
@@ -101,7 +77,7 @@ LB_VIP=${LB_VIP#llb-}
 kubectl exec -it sctp-client -- sctp_darn -H 10.0.10.110 -h ${LB_VIP} -P 36412 -p 36412 -s
 ```
 
-## 참고
+## Notes
 
-- kube-loxilb 환경에서는 LoadBalancer VIP가 `status.loadBalancer.ingress[0].hostname` 에 `llb-10.0.10.254` 형태로 나타날 수 있다.
-- 기능 테스트 스크립트는 이 경우를 처리하도록 되어 있다.
+- In kube-loxilb environments, the LoadBalancer VIP may appear in `status.loadBalancer.ingress[0].hostname` as `llb-10.0.10.254` instead of the `ip` field.
+- The functional test script already handles that case.
